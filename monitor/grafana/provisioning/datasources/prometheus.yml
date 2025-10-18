@@ -1,0 +1,44 @@
+# Grafana Datasource Configuration
+# Automatically provisions all three Prometheus instances as datasources
+
+apiVersion: 1
+
+datasources:
+  # Prometheus-Internal (Default) - Monitors Internal Network
+  - name: Prometheus-Internal
+    type: prometheus
+    access: proxy
+    url: http://10.0.2.19:9090
+    isDefault: true
+    editable: true
+    jsonData:
+      timeInterval: "15s"
+      queryTimeout: "60s"
+      httpMethod: "POST"
+    uid: prometheus-internal
+
+  # Prometheus-DMZ - Monitors DMZ Network
+  - name: Prometheus-DMZ
+    type: prometheus
+    access: proxy
+    url: http://10.0.1.19:9090
+    isDefault: false
+    editable: true
+    jsonData:
+      timeInterval: "15s"
+      queryTimeout: "60s"
+      httpMethod: "POST"
+    uid: prometheus-dmz
+
+  # Prometheus-Public - Monitors Public Network
+  - name: Prometheus-Public
+    type: prometheus
+    access: proxy
+    url: http://10.0.3.19:9090
+    isDefault: false
+    editable: true
+    jsonData:
+      timeInterval: "15s"
+      queryTimeout: "60s"
+      httpMethod: "POST"
+    uid: prometheus-public

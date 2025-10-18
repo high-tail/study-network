@@ -1,0 +1,765 @@
+# ============================================
+# DOCKER COMPOSE CONFIGURATION
+# Network Lab Environment - OSI Layers 3-7
+# ============================================
+#
+# Networks:
+#   - net_dmz (10.0.1.0/24): Web servers, HAProxy backend
+#   - net_internal (10.0.2.0/24): DNS, DHCP, monitoring
+#   - net_public (10.0.3.0/24): HAProxy frontend, Grafana
+#
+# ============================================
+
+services:
+  # ============================================
+  # LAYER 3: NETWORK LAYER - ROUTER (FRRouting)
+  # ============================================
+  router:
+    build:
+      context: ./router
+      dockerfile: Dockerfile
+    container_name: netlab-router
+    hostname: router
+
+    # Capabilities required for routing
+    cap_add:
+      - NET_ADMIN
+      - SYS_ADMIN
+
+    # Enable IP forwarding
+    sysctls:
+      - net.ipv4.ip_forward=1
+
+    # Multi-homed: connected to all three networks
+    networks:
+      net_dmz:
+        ipv4_address: ${ROUTER_IP_DMZ:-10.0.1.254}
+      net_internal:
+        ipv4_address: ${ROUTER_IP_INTERNAL:-10.0.2.254}
+      net_public:
+        ipv4_address: ${ROUTER_IP_PUBLIC:-10.0.3.254}
+
+    volumes:
+      - ./router/frr.conf:/etc/frr/frr.conf:ro
+      - ./router/daemons:/etc/frr/daemons:ro
+
+    # Health check: verify FRR is running
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "zebra"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+    restart: unless-stopped
+
+    # Labels for organization
+    labels:
+      com.netlab.service: "router"
+      com.netlab.layer: "layer3"
+      com.netlab.network: "all"
+      com.netlab.description: "FRRouting router for inter-network routing"
+
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # LAYER 7: DNS SERVER - LOCAL NAME RESOLUTION
+  # ============================================
+  dns:
+    build:
+      context: ./dns
+      dockerfile: Dockerfile
+    container_name: netlab-dns
+    hostname: dns
+
+    networks:
+      net_internal:
+        ipv4_address: ${DNS_IP:-10.0.2.10}
+
+    volumes:
+      - ./dns/dnsmasq.conf:/etc/dnsmasq.conf:ro
+
+    # Health check: verify dnsmasq is running
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "dnsmasq"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+    restart: unless-stopped
+
+    depends_on:
+      router:
+        condition: service_healthy
+
+    labels:
+      com.netlab.service: "dns"
+      com.netlab.layer: "layer7"
+      com.netlab.network: "internal"
+      com.netlab.description: "Dnsmasq DNS server for local name resolution"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # LAYER 7: DHCP SERVER - DYNAMIC IP ASSIGNMENT
+  # ============================================
+  dhcp:
+    build:
+      context: ./dhcp
+      dockerfile: Dockerfile
+    container_name: netlab-dhcp
+    hostname: dhcp
+
+    cap_add:
+      - NET_ADMIN
+
+    networks:
+      net_internal:
+        ipv4_address: ${DHCP_IP:-10.0.2.11}
+
+    volumes:
+      - ./dhcp/dhcpd.conf:/etc/dhcp/dhcpd.conf:ro
+
+    # Health check: verify DHCP daemon is running
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "dhcpd"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.25'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+    restart: unless-stopped
+
+    depends_on:
+      router:
+        condition: service_healthy
+      dns:
+        condition: service_healthy
+
+    labels:
+      com.netlab.service: "dhcp"
+      com.netlab.layer: "layer7"
+      com.netlab.network: "internal"
+      com.netlab.description: "ISC DHCP server for dynamic IP assignment"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # LAYER 7: WEB SERVER 1 - NGINX
+  # ============================================
+  web1:
+    build:
+      context: ./web1
+      dockerfile: Dockerfile
+    container_name: netlab-web1
+    hostname: web1
+
+    networks:
+      net_dmz:
+        ipv4_address: ${WEB1_IP:-10.0.1.10}
+
+    dns:
+      - ${DNS_IP:-10.0.2.10}
+
+    environment:
+      - SERVER_NAME=web1
+
+    # Health check: verify web server responds
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+    restart: unless-stopped
+
+    depends_on:
+      router:
+        condition: service_healthy
+      dns:
+        condition: service_healthy
+
+    labels:
+      com.netlab.service: "web1"
+      com.netlab.layer: "layer7"
+      com.netlab.network: "dmz"
+      com.netlab.description: "Nginx web server 1"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # LAYER 7: WEB SERVER 2 - NGINX
+  # ============================================
+  web2:
+    build:
+      context: ./web2
+      dockerfile: Dockerfile
+    container_name: netlab-web2
+    hostname: web2
+
+    networks:
+      net_dmz:
+        ipv4_address: ${WEB2_IP:-10.0.1.11}
+
+    dns:
+      - ${DNS_IP:-10.0.2.10}
+
+    environment:
+      - SERVER_NAME=web2
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+    restart: unless-stopped
+
+    depends_on:
+      router:
+        condition: service_healthy
+      dns:
+        condition: service_healthy
+
+    labels:
+      com.netlab.service: "web2"
+      com.netlab.layer: "layer7"
+      com.netlab.network: "dmz"
+      com.netlab.description: "Nginx web server 2"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # LAYER 4/7: LOAD BALANCER - HAPROXY
+  # ============================================
+  haproxy:
+    build:
+      context: ./haproxy
+      dockerfile: Dockerfile
+    container_name: netlab-haproxy
+    hostname: haproxy
+
+    # Multi-homed: connected to public and DMZ networks
+    networks:
+      net_public:
+        ipv4_address: ${HAPROXY_IP_PUBLIC:-10.0.3.10}
+      net_dmz:
+        ipv4_address: ${HAPROXY_IP_DMZ:-10.0.1.20}
+
+    ports:
+      - "${HAPROXY_HTTP_PORT:-8080}:80"
+      - "${HAPROXY_HTTPS_PORT:-8443}:443"
+      - "${HAPROXY_STATS_PORT:-8404}:8404"
+
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+
+    dns:
+      - ${DNS_IP:-10.0.2.10}
+
+    # Health check: verify HAProxy is running
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "haproxy"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+    restart: unless-stopped
+
+    depends_on:
+      router:
+        condition: service_healthy
+      web1:
+        condition: service_healthy
+      web2:
+        condition: service_healthy
+
+    labels:
+      com.netlab.service: "haproxy"
+      com.netlab.layer: "layer4-layer7"
+      com.netlab.network: "public-dmz"
+      com.netlab.description: "HAProxy load balancer for web servers"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # MONITORING: PROMETHEUS - INTERNAL NETWORK
+  # ============================================
+  prometheus-internal:
+    image: prom/prometheus:${PROMETHEUS_VERSION:-latest}
+    container_name: netlab-prometheus-internal
+    hostname: prometheus-internal
+
+    networks:
+      net_internal:
+        ipv4_address: ${PROMETHEUS_INTERNAL_IP:-10.0.2.19}
+
+    volumes:
+      - ./monitor/prometheus/prometheus-internal.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data_internal:/prometheus
+
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+      - '--web.enable-remote-write-receiver'
+
+    ports:
+      - "${PROMETHEUS_INTERNAL_PORT:-9090}:9090"
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1024M
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    restart: unless-stopped
+
+    depends_on:
+      router:
+        condition: service_healthy
+      dns:
+        condition: service_healthy
+
+    labels:
+      com.netlab.service: "prometheus"
+      com.netlab.network: "internal"
+      com.netlab.layer: "monitoring"
+      com.netlab.description: "Prometheus monitoring for internal network"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # MONITORING: PROMETHEUS - DMZ NETWORK
+  # ============================================
+  prometheus-dmz:
+    image: prom/prometheus:${PROMETHEUS_VERSION:-latest}
+    container_name: netlab-prometheus-dmz
+    hostname: prometheus-dmz
+
+    networks:
+      net_dmz:
+        ipv4_address: ${PROMETHEUS_DMZ_IP:-10.0.1.19}
+
+    volumes:
+      - ./monitor/prometheus/prometheus-dmz.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data_dmz:/prometheus
+
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+
+    ports:
+      - "${PROMETHEUS_DMZ_PORT:-9091}:9090"
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1024M
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    restart: unless-stopped
+
+    depends_on:
+      router:
+        condition: service_healthy
+      web1:
+        condition: service_healthy
+      web2:
+        condition: service_healthy
+
+    labels:
+      com.netlab.service: "prometheus"
+      com.netlab.network: "dmz"
+      com.netlab.layer: "monitoring"
+      com.netlab.description: "Prometheus monitoring for DMZ network"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # MONITORING: PROMETHEUS - PUBLIC NETWORK
+  # ============================================
+  prometheus-public:
+    image: prom/prometheus:${PROMETHEUS_VERSION:-latest}
+    container_name: netlab-prometheus-public
+    hostname: prometheus-public
+
+    networks:
+      net_public:
+        ipv4_address: ${PROMETHEUS_PUBLIC_IP:-10.0.3.19}
+
+    volumes:
+      - ./monitor/prometheus/prometheus-public.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data_public:/prometheus
+
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+
+    ports:
+      - "${PROMETHEUS_PUBLIC_PORT:-9092}:9090"
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1024M
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+    restart: unless-stopped
+
+    depends_on:
+      router:
+        condition: service_healthy
+      haproxy:
+        condition: service_healthy
+
+    labels:
+      com.netlab.service: "prometheus"
+      com.netlab.network: "public"
+      com.netlab.layer: "monitoring"
+      com.netlab.description: "Prometheus monitoring for public network"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # MONITORING: GRAFANA DASHBOARD
+  # ============================================
+  grafana:
+    image: grafana/grafana:${GRAFANA_VERSION:-latest}
+    container_name: netlab-grafana
+    hostname: grafana
+
+    # Multi-homed: connected to all networks for monitoring
+    networks:
+      net_internal:
+        ipv4_address: ${GRAFANA_IP_INTERNAL:-10.0.2.21}
+      net_dmz:
+        ipv4_address: ${GRAFANA_IP_DMZ:-10.0.1.21}
+      net_public:
+        ipv4_address: ${GRAFANA_IP_PUBLIC:-10.0.3.21}
+
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitor/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitor/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_ADMIN_USER:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
+
+    restart: unless-stopped
+
+    depends_on:
+      prometheus-internal:
+        condition: service_healthy
+      prometheus-dmz:
+        condition: service_healthy
+      prometheus-public:
+        condition: service_healthy
+
+    labels:
+      com.netlab.service: "grafana"
+      com.netlab.layer: "monitoring"
+      com.netlab.network: "all"
+      com.netlab.description: "Grafana dashboards for visualization"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
+  # PERFORMANCE TESTING: K6 LOAD GENERATOR
+  # ============================================
+  k6:
+    build:
+      context: ./k6
+      dockerfile: Dockerfile
+    container_name: netlab-k6
+    hostname: k6
+
+    networks:
+      net_internal:
+        ipv4_address: ${K6_IP:-10.0.2.30}
+      net_dmz:
+        ipv4_address: ${K6_IP_DMZ:-10.0.1.30}
+
+    dns:
+      - ${DNS_IP:-10.0.2.10}
+
+    environment:
+      - K6_PROMETHEUS_RW_SERVER_URL=http://prometheus-internal:9090/api/v1/write
+      - K6_PROMETHEUS_RW_TREND_STATS=p(95),p(99),min,max
+      - K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM=false
+
+    volumes:
+      - ./k6/scripts:/scripts:ro
+      - ./k6/config:/config:ro
+      - k6_results:/results
+
+    # K6 runs on-demand, not continuously
+    # Override entrypoint to keep container running
+    # Run tests with: docker exec netlab-k6 k6 run /scripts/load-test.js
+    entrypoint: ["/bin/sh", "-c", "sleep infinity"]
+
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+        reservations:
+          cpus: '1'
+          memory: 256M
+
+    restart: unless-stopped
+
+    depends_on:
+      haproxy:
+        condition: service_healthy
+      prometheus-internal:
+        condition: service_healthy
+
+    labels:
+      com.netlab.service: "k6"
+      com.netlab.layer: "testing"
+      com.netlab.network: "internal"
+      com.netlab.description: "K6 load testing and performance monitoring"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ============================================
+# NETWORK DEFINITIONS
+# ============================================
+networks:
+  # DMZ Network - Web servers and HAProxy backend
+  net_dmz:
+    driver: bridge
+    name: ${COMPOSE_PROJECT_NAME:-study-network}_net_dmz
+    ipam:
+      driver: default
+      config:
+        - subnet: ${DMZ_SUBNET:-10.0.1.0/24}
+          gateway: ${DMZ_GATEWAY:-10.0.1.1}
+    labels:
+      com.netlab.network: "dmz"
+      com.netlab.description: "DMZ network for web servers"
+
+  # Internal Network - DNS, DHCP, Monitoring
+  net_internal:
+    driver: bridge
+    name: ${COMPOSE_PROJECT_NAME:-study-network}_net_internal
+    ipam:
+      driver: default
+      config:
+        - subnet: ${INTERNAL_SUBNET:-10.0.2.0/24}
+          gateway: ${INTERNAL_GATEWAY:-10.0.2.1}
+    labels:
+      com.netlab.network: "internal"
+      com.netlab.description: "Internal network for infrastructure services"
+
+  # Public Network - External access point
+  net_public:
+    driver: bridge
+    name: ${COMPOSE_PROJECT_NAME:-study-network}_net_public
+    ipam:
+      driver: default
+      config:
+        - subnet: ${PUBLIC_SUBNET:-10.0.3.0/24}
+          gateway: ${PUBLIC_GATEWAY:-10.0.3.1}
+    labels:
+      com.netlab.network: "public"
+      com.netlab.description: "Public network for external access"
+
+# ============================================
+# PERSISTENT VOLUMES
+# ============================================
+volumes:
+  prometheus_data_internal:
+    name: ${COMPOSE_PROJECT_NAME:-study-network}_prometheus_internal
+    labels:
+      com.netlab.description: "Prometheus data for internal network"
+
+  prometheus_data_dmz:
+    name: ${COMPOSE_PROJECT_NAME:-study-network}_prometheus_dmz
+    labels:
+      com.netlab.description: "Prometheus data for DMZ network"
+
+  prometheus_data_public:
+    name: ${COMPOSE_PROJECT_NAME:-study-network}_prometheus_public
+    labels:
+      com.netlab.description: "Prometheus data for public network"
+
+  grafana_data:
+    name: ${COMPOSE_PROJECT_NAME:-study-network}_grafana
+    labels:
+      com.netlab.description: "Grafana configuration and dashboards"
+
+  k6_results:
+    name: ${COMPOSE_PROJECT_NAME:-study-network}_k6_results
+    labels:
+      com.netlab.description: "K6 test results and reports"
