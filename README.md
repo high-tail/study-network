@@ -6,104 +6,9 @@ A complete, locally runnable networking lab environment built with Docker that d
 
 This lab provides a fully functional multi-tier network environment for learning and testing networking concepts. All services run locally using Docker and Docker Compose with no external dependencies after the initial build.
 
-### Architecture
+Three isolated Docker networks (DMZ, Internal, Public) connected via an FRRouting router, with HAProxy load balancing, DNS, DHCP, Prometheus monitoring, Grafana dashboards, and K6 load testing.
 
-```
-┌──────────────────────────────────────────────────────────────────────┐
-│                      PUBLIC NETWORK (10.0.3.0/24)                    │
-│                                                                      │
-│  ┌──────────┐  ┌────────────┐  ┌──────────┐  ┌──────────────────┐    │
-│  │  Router  │  │  HAProxy   │  │ Grafana  │  │ Prometheus-Public│    │
-│  │ (.254)   │  │  (.10)     │  │  (.21)   │  │     (.19)        │    │
-│  │(Layer 3) │  │ (Layer 4/7)│  │(Monitor) │  │  (Metrics)       │    │
-│  └────┬─────┘  └──────┬─────┘  └────┬─────┘  └──────────────────┘    │
-└───────┼───────────────┼─────────────┼────────────────────────────────┘
-        │               │             │
-        │               │             │
-┌───────┼───────────────┼─────────────┼────────────────────────────────┐
-│       │      DMZ NETWORK (10.0.1.0/24)            │                  │
-│       │               │             │             │                  │
-│  ┌────┴─────┐    ┌────┴────┐   ┌────┴────┐   ┌────┴────┐  ┌───────┐  │
-│  │  Router  │    │ HAProxy │   │  Web1   │   │  Web2   │  │Prom-  │  │
-│  │ (.254)   │    │  (.20)  │   │  (.10)  │   │  (.11)  │  │ DMZ   │  │
-│  │          │    │(Backend)│   │(Layer 7)│   │(Layer 7)│  │(.19)  │  │
-│  └────┬─────┘    └─────────┘   └─────────┘   └─────────┘  └───────┘  │
-└───────┼──────────────────────────────────────────────────────────────┘
-        │
-        │
-┌───────┼──────────────────────────────────────────────────────────────┐
-│       │         INTERNAL NETWORK (10.0.2.0/24)                       │
-│       │                                                              │
-│  ┌────┴─────┐  ┌─────────┐  ┌─────────┐  ┌──────────┐  ┌──────────┐  │
-│  │  Router  │  │   DNS   │  │  DHCP   │  │ Grafana  │  │Prom-Int. │  │
-│  │ (.254)   │  │  (.10)  │  │  (.11)  │  │  (.21)   │  │  (.19)   │  │
-│  │          │  │ Server  │  │ Server  │  │(Multi-NW)│  │(Metrics) │  │
-│  └──────────┘  └─────────┘  └─────────┘  └──────────┘  └──────────┘  │
-│                                                                      │
-└──────────────────────────────────────────────────────────────────────┘
-
-Legend:
-  Router: Connected to all 3 networks, provides inter-network routing
-  HAProxy: Dual-homed (Public front-end, DMZ back-end)
-  Grafana: Triple-homed (queries Prometheus in all networks)
-  Prometheus: 3 instances, one per network for isolated monitoring
-```
-
-## Features
-
-### 🚀 DevOps Best Practices (New!)
-
-This lab now implements production-ready DevOps practices:
-
-- ✅ **Health Checks**: Every service has health monitoring
-- ✅ **Resource Limits**: CPU and memory constraints prevent resource exhaustion
-- ✅ **Auto-Restart**: Services automatically recover from failures (`restart: unless-stopped`)
-- ✅ **Smart Dependencies**: Services start in correct order based on health conditions
-- ✅ **Static Configuration**: Prometheus monitors network segments with explicit target definitions
-- ✅ **Environment Variables**: Easy configuration via `.env` file
-- ✅ **Log Rotation**: JSON logs with automatic rotation (max 30MB per container)
-- ✅ **Labels & Metadata**: Organized metadata for filtering and organization
-
-**Quick Config:**
-
-### Network Components by OSI Layer
-
-- **Layer 3 (Network)**: FRRouting for inter-network routing
-- **Layer 4 (Transport)**: HAProxy for TCP/HTTP load balancing
-- **Layer 7 (Application)**:
-  - Nginx web servers (web1, web2)
-  - DNS server (Dnsmasq)
-  - DHCP server (ISC DHCP)
-  - HTTP load balancing with HAProxy
-
-### Monitoring Stack
-
-- **Prometheus** (3 instances): Network-segmented metrics collection
-  - **Prometheus-Internal** (10.0.2.19:9090): Monitors DNS, DHCP, Router
-  - **Prometheus-DMZ** (10.0.1.19:9091): Monitors Web1, Web2, HAProxy backend, Router
-  - **Prometheus-Public** (10.0.3.19:9092): Monitors HAProxy frontend, Router
-  - Static target configuration (no service discovery)
-  - 15-second scrape interval
-  - Network isolation: each instance only monitors its network segment
-
-- **Grafana** (10.0.2.21 / 10.0.1.21 / 10.0.3.21): Multi-network monitoring
-  - Connected to all three networks
-  - Queries all three Prometheus instances
-  - Unified dashboard showing metrics across all networks
-  - Pre-configured datasources for each Prometheus
-
-- **Node Exporter**: Per-container system metrics
-  - Embedded in every container (runs on port 9100)
-  - Metrics: CPU, memory, disk I/O, network traffic
-  - Started via wrapper script with main service
-
-### Network Topology
-
-Three isolated networks connected through a router:
-
-1. **DMZ Network (10.0.1.0/24)**: Web servers and public-facing services
-2. **Internal Network (10.0.2.0/24)**: DNS, DHCP, and monitoring services
-3. **Public Network (10.0.3.0/24)**: External access point with load balancer
+For architecture diagrams, OSI layer details, and learning exercises, see **[overview.md](overview.md)**.
 
 ## Prerequisites
 
@@ -165,6 +70,26 @@ sleep 30
 ./scripts/test_connectivity.sh   # Layer 3 routing tests
 ./scripts/test_dns.sh             # DNS resolution tests
 ./scripts/test_http.sh            # HTTP load balancing tests
+./scripts/test_https.sh           # HTTPS/TLS tests (requires certs)
+```
+
+### 5. Run K6 Performance Tests
+
+```bash
+# Quick smoke test (1 min)
+./scripts/run_k6_smoke.sh
+
+# Full load test (16 min)
+./scripts/run_k6_load.sh
+
+# Stress test with 100 VUs (~8.5 min)
+./scripts/run_k6_stress.sh
+
+# Spike test with 200 VUs (~5.5 min)
+./scripts/run_k6_spike.sh
+
+# Interactive menu for all test profiles
+./scripts/run_k6_tests.sh
 ```
 
 ## Detailed Usage
@@ -193,8 +118,9 @@ Test DNS name resolution:
 docker exec netlab-haproxy nslookup web1.netlab.local 10.0.2.10
 docker exec netlab-haproxy nslookup web2.netlab.local 10.0.2.10
 
-# Test CNAME resolution
+# Test CNAME resolution (www and api point to haproxy)
 docker exec netlab-haproxy nslookup www.netlab.local 10.0.2.10
+docker exec netlab-haproxy nslookup api.netlab.local 10.0.2.10
 
 # View DNS logs
 docker logs netlab-dns
@@ -218,6 +144,24 @@ curl http://localhost:8404/stats
 docker logs netlab-haproxy
 ```
 
+### Testing HTTPS/TLS
+
+Test SSL termination and HTTPS backends:
+
+```bash
+# HTTPS via HAProxy (SSL termination)
+curl -k https://localhost:8443/
+
+# Direct HTTPS to web3
+docker exec netlab-haproxy curl -k https://10.0.1.12/
+
+# View TLS details
+docker exec netlab-haproxy curl -k https://10.0.1.12/tls-info
+
+# Run HTTPS test suite
+./scripts/test_https.sh
+```
+
 ### Testing Direct Web Server Access
 
 Access web servers directly (bypassing load balancer):
@@ -229,9 +173,13 @@ docker exec netlab-haproxy curl http://10.0.1.10/
 # Access from HAProxy container to web2
 docker exec netlab-haproxy curl http://10.0.1.11/
 
+# Access web3 over HTTPS
+docker exec netlab-haproxy curl -k https://10.0.1.12/
+
 # Check health endpoints
 docker exec netlab-haproxy curl http://10.0.1.10/health
 docker exec netlab-haproxy curl http://10.0.1.11/health
+docker exec netlab-haproxy curl -k https://10.0.1.12/health
 ```
 
 ### Monitoring and Observability
@@ -254,7 +202,7 @@ docker exec netlab-haproxy curl http://10.0.1.11/health
 # Query Prometheus-Internal (DNS, DHCP, Router metrics)
 open http://localhost:9090
 
-# Query Prometheus-DMZ (Web1, Web2, HAProxy backend metrics)
+# Query Prometheus-DMZ (Web1, Web2, Web3, HAProxy backend metrics)
 open http://localhost:9091
 
 # Query Prometheus-Public (HAProxy frontend metrics)
@@ -307,158 +255,7 @@ docker exec netlab-dhcp cat /var/lib/dhcp/dhcpd.leases
 docker exec netlab-dhcp cat /etc/dhcp/dhcpd.conf
 ```
 
-## Container Details
-
-### Service Information
-
-| Service | Container Name | IP Address(es) | Network(s) | Purpose |
-|---------|---------------|----------------|------------|---------|
-| Router | netlab-router | 10.0.1.254, 10.0.2.254, 10.0.3.254 | All | Layer 3 routing (FRRouting) |
-| DNS | netlab-dns | 10.0.2.10 | Internal | Name resolution (Dnsmasq) |
-| DHCP | netlab-dhcp | 10.0.2.11 | Internal | Dynamic IP assignment (ISC DHCP) |
-| Web1 | netlab-web1 | 10.0.1.10 | DMZ | HTTP server (Nginx) |
-| Web2 | netlab-web2 | 10.0.1.11 | DMZ | HTTP server (Nginx) |
-| HAProxy | netlab-haproxy | 10.0.3.10 (public), 10.0.1.20 (dmz) | Public, DMZ | Load balancer (HAProxy) |
-| Prometheus-Internal | netlab-prometheus-internal | 10.0.2.19 | Internal | Metrics collection (Internal network) |
-| Prometheus-DMZ | netlab-prometheus-dmz | 10.0.1.19 | DMZ | Metrics collection (DMZ network) |
-| Prometheus-Public | netlab-prometheus-public | 10.0.3.19 | Public | Metrics collection (Public network) |
-| Grafana | netlab-grafana | 10.0.2.21, 10.0.1.21, 10.0.3.21 | All | Monitoring dashboard (multi-network) |
-
-**Note**: All containers run node-exporter on port 9100 internally for per-container metrics.
-
-### Port Mappings
-
-| Service | Host Port | Container Port | Purpose |
-|---------|-----------|----------------|---------|
-| HAProxy | 8080 | 80 | HTTP load balancer |
-| HAProxy | 8443 | 443 | HTTPS (not configured) |
-| HAProxy Stats | 8404 | 8404 | Statistics page |
-| Grafana | 3000 | 3000 | Dashboard UI |
-| Prometheus-Internal | 9090 | 9090 | Internal network metrics UI |
-| Prometheus-DMZ | 9091 | 9090 | DMZ network metrics UI |
-| Prometheus-Public | 9092 | 9090 | Public network metrics UI |
-
-**Note**: Port 9100 (node-exporter) is accessible internally within containers but not exposed to the host.
-
-## Learning Guide
-
-### Understanding OSI Layers
-
-This lab demonstrates the following OSI layers:
-
-#### Layer 3 - Network Layer
-- **Component**: FRRouting router
-- **What it does**: Routes packets between different network segments (DMZ, Internal, Public)
-- **Test it**: `docker exec netlab-router vtysh -c "show ip route"`
-
-#### Layer 4 - Transport Layer
-- **Component**: HAProxy (TCP mode)
-- **What it does**: Load balances TCP connections, manages sessions
-- **Test it**: View HAProxy stats at http://localhost:8404/stats
-
-#### Layer 5 - Session Layer
-- **Component**: HAProxy session management
-- **What it does**: Maintains persistent connections, cookie-based session affinity
-- **Test it**: Notice SERVERID cookies in HAProxy config
-
-#### Layer 6 - Presentation Layer
-- **Component**: HTTPS/SSL termination (configured but no certs)
-- **What it does**: Encryption, data format conversion
-- **Test it**: HAProxy listens on port 443 for HTTPS
-
-#### Layer 7 - Application Layer
-- **Components**: HTTP servers, DNS, DHCP
-- **What it does**: Application-specific protocols (HTTP, DNS, DHCP)
-- **Test it**: `curl http://localhost:8080`
-
-### Experimentation Ideas
-
-#### 1. Test Routing Behavior
-
-Simulate network segmentation:
-
-```bash
-# Add a static route
-docker exec netlab-router vtysh -c "configure terminal" -c "ip route 192.168.0.0/24 10.0.1.1"
-
-# View routing table
-docker exec netlab-router vtysh -c "show ip route"
-```
-
-#### 2. Simulate Server Failure
-
-Test HAProxy failover:
-
-```bash
-# Stop web1
-docker stop netlab-web1
-
-# Make requests - they should all go to web2
-for i in {1..5}; do curl -s http://localhost:8080/ | grep SERVER; done
-
-# Restart web1
-docker start netlab-web1
-```
-
-#### 3. Analyze DNS Queries
-
-Monitor DNS traffic:
-
-```bash
-# Watch DNS logs in real-time
-docker logs -f netlab-dns
-
-# In another terminal, make DNS queries
-docker exec netlab-haproxy nslookup web1.netlab.local 10.0.2.10
-```
-
-#### 4. Test Load Balancing Algorithms
-
-Modify HAProxy configuration to test different algorithms:
-
-```bash
-# Edit haproxy/haproxy.cfg
-# Change 'balance roundrobin' to 'balance leastconn' or 'balance source'
-
-# Rebuild and restart
-docker compose up -d --build haproxy
-```
-
-#### 5. Monitor Network Performance
-
-Use Grafana to visualize performance:
-
-1. Open http://localhost:3000
-2. Create custom queries in Prometheus
-3. Watch container CPU and memory usage under load
-4. Generate load: `for i in {1..100}; do curl http://localhost:8080/ & done`
-
-### Advanced Exercises
-
-1. **Add a new web server**:
-   - Create web3 directory
-   - Add to docker-compose.yml
-   - Update HAProxy backend pool
-   - Update DNS records
-
-2. **Implement HTTPS**:
-   - Generate self-signed certificates
-   - Configure HAProxy SSL termination
-   - Test with `curl -k https://localhost:8443`
-
-3. **Create custom Grafana dashboards**:
-   - Add panels for HAProxy metrics
-   - Monitor DNS query rates
-   - Track request distribution
-
-4. **Implement caching**:
-   - Add Varnish or Nginx caching layer
-   - Measure performance improvement
-
-5. **Network traffic analysis**:
-   - Use tcpdump to capture packets
-   - Analyze with Wireshark
-   - Identify different protocol layers
+For component IPs, port mappings, and OSI layer details, see **[overview.md](overview.md)**.
 
 ## Troubleshooting
 
@@ -565,10 +362,10 @@ docker system prune -a
 ```
 network-lab/
 ├── docker-compose.yml          # Main orchestration file (with health checks, dependencies)
-├── .env.example                # Environment variable template
+├── .env                        # Environment variables (IPs, ports, credentials, versions)
+├── CLAUDE.md                   # AI assistant project instructions
 ├── README.md                   # This file
-├── ARCHITECTURE.md             # Detailed architecture documentation
-├── REFACTORING.md              # DevOps refactoring details
+├── overview.md                 # Architecture diagrams, OSI layers, learning guide
 ├── router/
 │   ├── Dockerfile             # FRRouting router image
 │   ├── frr.conf               # Routing configuration
@@ -590,10 +387,23 @@ network-lab/
 │   ├── Dockerfile             # Nginx web server 2
 │   ├── index.html             # Web content
 │   └── start-with-exporter.sh # Wrapper to start Nginx + node-exporter
+├── web3/
+│   ├── Dockerfile             # Nginx web server 3 with HTTPS/TLS
+│   ├── index.html             # Web content
+│   └── start-with-exporter.sh # Wrapper to start Nginx + node-exporter
 ├── haproxy/
 │   ├── Dockerfile             # HAProxy load balancer
-│   ├── haproxy.cfg            # Load balancer config
+│   ├── haproxy.cfg            # Load balancer config (HTTP + HTTPS frontends)
 │   └── start-with-exporter.sh # Wrapper to start HAProxy + node-exporter
+├── k6/
+│   ├── Dockerfile             # K6 load testing container
+│   ├── README.md              # K6 test documentation
+│   └── scripts/
+│       ├── smoke-test.js      # Quick 1-min verification
+│       ├── load-test.js       # 16-min load test
+│       ├── stress-test.js     # Stress test (100 VUs)
+│       └── spike-test.js      # Spike test (200 VUs)
+├── certs/                      # TLS certificates (gitignored, self-signed)
 ├── monitor/
 │   ├── prometheus/
 │   │   ├── prometheus-internal.yml  # Internal network scrape config
@@ -601,89 +411,26 @@ network-lab/
 │   │   └── prometheus-public.yml    # Public network scrape config
 │   └── grafana/
 │       ├── dashboards/
-│       │   └── network-lab.json     # Multi-Prometheus dashboard
+│       │   ├── network-lab.json     # Multi-Prometheus dashboard
+│       │   └── k6-netlab.json       # K6 performance dashboard
 │       └── provisioning/
+│           ├── dashboards/
+│           │   └── dashboard.yml    # Dashboard provisioning config
 │           └── datasources/
 │               └── prometheus.yml   # 3 Prometheus datasources
 └── scripts/
     ├── test_all.sh            # Run all tests
     ├── test_connectivity.sh   # Layer 3 tests
     ├── test_dns.sh            # DNS tests
-    └── test_http.sh           # HTTP/load balancing tests
+    ├── test_http.sh           # HTTP/load balancing tests
+    ├── test_https.sh          # HTTPS/TLS tests
+    ├── generate-certs.sh      # Generate self-signed TLS certificates
+    ├── run_k6_smoke.sh        # K6 smoke test runner
+    ├── run_k6_load.sh         # K6 load test runner
+    ├── run_k6_stress.sh       # K6 stress test runner
+    ├── run_k6_spike.sh        # K6 spike test runner
+    └── run_k6_tests.sh        # Interactive K6 test menu
 ```
-
-## Multi-Prometheus Architecture
-
-### Why Three Prometheus Instances?
-
-This lab uses a **network-segmented monitoring approach** with three separate Prometheus instances:
-
-1. **Educational Value**: Demonstrates real-world network segmentation and security boundaries
-2. **Network Isolation**: Each Prometheus can only monitor services in its own network segment
-3. **Realistic Deployment**: Mirrors production environments with DMZ/Internal/Public zones
-4. **Security Best Practice**: Limits blast radius if one network segment is compromised
-
-### How It Works
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  Grafana (Multi-Network)                                    │
-│  ├─ Queries: Prometheus-Internal (10.0.2.19:9090)           │
-│  ├─ Queries: Prometheus-DMZ (10.0.1.19:9090)                │
-│  └─ Queries: Prometheus-Public (10.0.3.19:9090)             │
-└─────────────────────────────────────────────────────────────┘
-         │                    │                    │
-         │                    │                    │
-         ▼                    ▼                    ▼
-┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│ Prom-Internal   │  │ Prom-DMZ        │  │ Prom-Public     │
-├─────────────────┤  ├─────────────────┤  ├─────────────────┤
-│ Targets:        │  │ Targets:        │  │ Targets:        │
-│ • Router :9100  │  │ • Router :9100  │  │ • Router :9100  │
-│ • DNS :9100     │  │ • Web1 :9100    │  │ • HAProxy :9100 │
-│ • DHCP :9100    │  │ • Web2 :9100    │  │ • Self :9090    │
-│ • Self :9090    │  │ • HAProxy :9100 │  │                 │
-│                 │  │ • Self :9090    │  │                 │
-└─────────────────┘  └─────────────────┘  └─────────────────┘
-```
-
-### Configuration Files
-
-Each Prometheus instance has its own configuration with **static targets**:
-
-- [monitor/prometheus/prometheus-internal.yml](monitor/prometheus/prometheus-internal.yml)
-- [monitor/prometheus/prometheus-dmz.yml](monitor/prometheus/prometheus-dmz.yml)
-- [monitor/prometheus/prometheus-public.yml](monitor/prometheus/prometheus-public.yml)
-
-### Grafana Integration
-
-Grafana is connected to all three networks and aggregates data from all Prometheus instances:
-
-- **Datasource UIDs**: `prometheus-internal`, `prometheus-dmz`, `prometheus-public`
-- **Dashboard**: Queries all three datasources simultaneously
-- **Panels**: Show metrics from all networks in unified views
-
-## Additional Resources
-
-### Understanding the Components
-
-- **FRRouting**: Open-source routing software suite
-- **Dnsmasq**: Lightweight DNS/DHCP server
-- **HAProxy**: High-performance TCP/HTTP load balancer
-- **Prometheus**: Time-series metrics database
-- **Grafana**: Metrics visualization platform
-
-### OSI Model Reference
-
-| Layer | Number | Name | Protocols | Lab Component |
-|-------|--------|------|-----------|---------------|
-| Application | 7 | Application | HTTP, DNS, DHCP | Nginx, Dnsmasq |
-| Presentation | 6 | Presentation | SSL/TLS | HAProxy SSL |
-| Session | 5 | Session | NetBIOS, RPC | HAProxy sessions |
-| Transport | 4 | Transport | TCP, UDP | HAProxy |
-| Network | 3 | Network | IP, ICMP, Routing | FRRouting |
-| Data Link | 2 | Data Link | Ethernet, ARP | Docker networks |
-| Physical | 1 | Physical | Physical medium | Host network |
 
 ## License
 
@@ -694,5 +441,3 @@ This project is provided as-is for educational purposes.
 Feel free to extend this lab environment with additional services or network configurations.
 
 ---
-
-**Happy Learning!** 🚀

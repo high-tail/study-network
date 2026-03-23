@@ -14,7 +14,6 @@
   --collector.loadavg \
   --collector.stat &
 
-# Store the PID
 NODE_EXPORTER_PID=$!
 
 # Function to handle shutdown
@@ -28,5 +27,15 @@ shutdown() {
 # Trap SIGTERM and SIGINT
 trap shutdown SIGTERM SIGINT
 
-# Start the main service in the foreground
-exec "$@"
+# Start the main service in the background so this shell stays alive
+# to receive signals and clean up node_exporter on container stop
+"$@" &
+MAIN_PID=$!
+
+# Wait for main process to exit
+wait $MAIN_PID
+MAIN_EXIT=$?
+
+# Cleanup node_exporter
+kill $NODE_EXPORTER_PID 2>/dev/null
+exit $MAIN_EXIT

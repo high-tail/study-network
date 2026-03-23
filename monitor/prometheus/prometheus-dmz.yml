@@ -60,6 +60,16 @@ scrape_configs:
           osi_layer: 'layer7'
           network: 'dmz'
 
+  # Node Exporter - Web3 container metrics (HTTPS/TLS)
+  - job_name: 'node-exporter-web3'
+    static_configs:
+      - targets: ['10.0.1.12:9100']
+        labels:
+          service: 'web3'
+          osi_layer: 'layer7'
+          network: 'dmz'
+          tls_enabled: 'true'
+
   # Node Exporter - HAProxy DMZ interface
   - job_name: 'node-exporter-haproxy'
     static_configs:
