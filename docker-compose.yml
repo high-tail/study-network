@@ -708,7 +708,7 @@ services:
 
     networks:
       net_internal:
-        ipv4_address: ${K6_IP:-10.0.2.30}
+        ipv4_address: ${K6_IP_INTERNAL:-10.0.2.30}
       net_dmz:
         ipv4_address: ${K6_IP_DMZ:-10.0.1.30}
 
