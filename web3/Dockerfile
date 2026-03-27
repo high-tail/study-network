@@ -45,7 +45,8 @@ server {
 
 # HTTPS Server
 server {
-    listen 443 ssl http2;
+    listen 443 ssl;
+    http2 on;
     server_name web3.netlab.local web3;
 
     # TLS/SSL Configuration
@@ -70,6 +71,10 @@ server {
     location / {
         root /usr/share/nginx/html;
         index index.html;
+        add_header Strict-Transport-Security "max-age=63072000" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
         add_header X-Served-By web3;
         add_header X-Protocol $server_protocol;
         add_header X-TLS-Version $ssl_protocol;
@@ -79,16 +84,28 @@ server {
     location /health {
         access_log off;
         return 200 '{"status": "healthy", "server": "web3", "protocol": "https", "tls": "$ssl_protocol"}';
+        add_header Strict-Transport-Security "max-age=63072000" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
         add_header Content-Type application/json;
     }
 
     location /info {
         return 200 'Server: web3\nIP: $server_addr\nTime: $time_local\nProtocol: $server_protocol\nTLS Version: $ssl_protocol\nCipher: $ssl_cipher\n';
+        add_header Strict-Transport-Security "max-age=63072000" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
         add_header Content-Type text/plain;
     }
 
     location /tls-info {
         return 200 '{"server": "web3", "protocol": "$server_protocol", "tls_version": "$ssl_protocol", "cipher": "$ssl_cipher", "session_reused": "$ssl_session_reused"}';
+        add_header Strict-Transport-Security "max-age=63072000" always;
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
         add_header Content-Type application/json;
     }
 }

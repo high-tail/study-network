@@ -144,6 +144,9 @@ chmod 600 "$CERTS_DIR"/haproxy.pem
 
 echo -e "  ✓ Permissions set\n"
 
+# Clean up temporary CSR and SAN config files
+rm -f "$CERTS_DIR"/*.csr "$CERTS_DIR"/*-san.cnf
+
 #---------------------------------------------------------------------
 # Summary
 #---------------------------------------------------------------------

@@ -104,7 +104,7 @@ curl -X POST http://localhost:9090/-/reload  # Prometheus hot reload
 4. Add DNS entry in `dns/dnsmasq.conf`
 5. Add Prometheus target in `monitor/prometheus/prometheus-dmz.yml`
 
-**Note**: HAProxy has separate backends: `web_servers` (HTTP, web1+web2 only) and `web_servers_mixed` (HTTPS, web1+web2+web3).
+**Note**: HAProxy has separate backends: `web_servers_http` (HTTP, web1+web2 only), `web_servers_https` (HTTPS, web3 only), and `static_servers` (HTTP only, web1+web2).
 
 ### New Network Segment
 
@@ -120,7 +120,7 @@ curl -X POST http://localhost:9090/-/reload  # Prometheus hot reload
 ./scripts/test_https.sh           # Test HTTPS endpoints
 ```
 
-Certificates: `certs/` directory (gitignored, self-signed, 365-day validity). HAProxy requires combined PEM: `cat cert.pem key.pem > haproxy.pem`.
+Certificates: `certs/` directory (gitignored, self-signed, 365-day validity). HAProxy requires combined PEM: `cat cert.pem key.pem > haproxy.pem`. Temporary `.csr` and `*-san.cnf` files are auto-cleaned by the script after generation.
 
 ## Development Guidelines
 
@@ -130,7 +130,7 @@ Certificates: `certs/` directory (gitignored, self-signed, 365-day validity). HA
 - Each container runs node-exporter on port 9100 for metrics
 - All services have health checks - check with `docker compose ps`
 - All container names use `netlab-` prefix (e.g., `netlab-router`, `netlab-web1`)
-- `.env` file contains all IPs, ports, credentials, and image versions
+- `.env` file contains all IPs, ports, credentials, and image versions — it is committed to git with lab defaults (admin/admin passwords are intentional for local-only use)
 - Active Prometheus configs are `monitor/prometheus/prometheus-{internal,dmz,public}.yml`
 
 ### Known Gaps
@@ -138,6 +138,9 @@ Certificates: `certs/` directory (gitignored, self-signed, 365-day validity). HA
 - **Prometheus gaps**: Grafana (`grafana/grafana` image) and K6 (`grafana/k6` image) do not run node-exporter, so they are not scraped by any Prometheus instance
 - **DNS reachability**: The DNS server (10.0.2.10) is only directly reachable from the Internal network (10.0.2.0/24). Containers in DMZ/Public use Docker's internal resolver and cannot query it by IP. Use `netlab-dns` (127.0.0.1) or `netlab-k6` for DNS testing.
 - **Cross-network ping**: End hosts route through Docker's gateway (10.0.X.1), not the FRRouting router. Cross-network pings from DMZ/Public containers to other networks will fail. Test cross-network routing from `netlab-router` instead.
+- **HAProxy backends**: `static_servers` uses only plain HTTP servers (web1/web2) — HAProxy terminates TLS at the frontend, so never add HTTPS servers to this backend. `web_servers_https` is the only backend that connects to web3 via SSL.
+- **Nginx `add_header` inheritance**: Any `add_header` in a `location` block replaces all `add_header` from the parent `server` block. Repeat security headers in every `location` that uses `add_header`.
+- **PR review comments**: Claude bot posts reviews as regular PR comments — use `get_comments` (not `get_review_comments` or `get_reviews`) when fetching them via GitHub MCP.
 
 ## Common Issues
 
