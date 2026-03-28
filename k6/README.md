@@ -15,14 +15,14 @@ K6 is a modern load testing tool that allows you to test the performance and rel
 ## Architecture
 
 ```
-K6 (10.0.2.30) → HAProxy (10.0.3.10) → Web1/Web2 (10.0.1.10-11)
-              ↓
-      Prometheus (10.0.2.19) → Grafana (10.0.2.21)
+K6 (10.0.1.30) ──DMZ──→ HAProxy (10.0.1.20) → Web1/Web2 (10.0.1.10-11)
+K6 (10.0.2.30) ─Internal─→ Prometheus (10.0.2.19) → Grafana (10.0.2.21)
 ```
 
-- **K6 Container**: Runs in the Internal network, sends traffic to HAProxy
-- **Metrics Flow**: K6 → Prometheus (via remote write) → Grafana dashboards
-- **Target**: HAProxy load balancer (`haproxy.netlab.local:8080`)
+- **K6 Container**: Dual-homed (Internal 10.0.2.30 + DMZ 10.0.1.30)
+- **Traffic Flow**: K6 DMZ interface → HAProxy DMZ interface (same subnet, direct)
+- **Metrics Flow**: K6 → Prometheus-Internal (via remote write) → Grafana dashboards
+- **Target**: HAProxy DMZ interface (`http://10.0.1.20:80`)
 
 ## Test Scenarios
 
@@ -72,17 +72,16 @@ docker compose exec k6 k6 run --out experimental-prometheus-rw /scripts/load-tes
 ### 3. Stress Test (`stress-test.js`)
 **Purpose**: Find system breaking point and identify bottlenecks
 
-- **Duration**: ~26 minutes
+- **Duration**: ~8.5 minutes
 - **Stages**:
-  - Ramp up to 20 VUs (2 min)
-  - Maintain 20 VUs (5 min)
-  - Ramp up to 50 VUs (2 min)
-  - Maintain 50 VUs (5 min)
-  - Ramp up to 100 VUs (2 min)
-  - Maintain 100 VUs (5 min) ← **STRESS LEVEL**
-  - Ramp down to 0 VUs (5 min) ← **RECOVERY**
+  - Normal load: 10 VUs (30 sec)
+  - Ramp up to 100 VUs (2 min) ← **STRESS RAMP**
+  - Maintain 100 VUs (30 sec) ← **PEAK STRESS**
+  - Recovery to 10 VUs (2 min)
+  - Observation at 10 VUs (3 min)
+  - Ramp down to 0 VUs (30 sec)
 - **Thresholds**:
-  - 95% of requests < 2000ms (relaxed for stress)
+  - 95% of requests < 5000ms (relaxed for stress conditions)
   - Error rate < 10% (some failures expected)
 - **Monitor**: CPU, memory, network usage with `docker stats`
 
@@ -128,7 +127,7 @@ docker compose exec k6 k6 run --vus 50 --duration 30s /scripts/load-test.js
 docker compose exec k6 k6 run /scripts/smoke-test.js
 
 # Run with custom environment variables
-docker compose exec -e BASE_URL=http://10.0.3.10 k6 k6 run /scripts/load-test.js
+docker compose exec -e BASE_URL=http://10.0.1.20 k6 k6 run /scripts/load-test.js
 
 # Run and save results to file
 docker compose exec k6 k6 run --out json=/results/test-results.json /scripts/load-test.js
@@ -196,15 +195,17 @@ While tests are running, monitor:
 
 K6 is pre-configured with:
 
-- `K6_PROMETHEUS_RW_SERVER_URL`: Prometheus remote write endpoint
-- `K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM`: Enable histogram support
+- `K6_PROMETHEUS_RW_SERVER_URL`: Prometheus remote write endpoint (`http://prometheus-internal:9090/api/v1/write`)
+- `K6_PROMETHEUS_RW_TREND_STATS`: Trend statistics to export (`p(95),p(99),min,max`)
+- `K6_PROMETHEUS_RW_TREND_AS_NATIVE_HISTOGRAM`: Native histogram support (disabled)
 
 ### Network Configuration
 
-K6 runs in the Internal network (`10.0.2.0/24`) with:
-- IP Address: `10.0.2.30`
-- DNS: Uses internal DNS server (`10.0.2.10`)
-- Target: HAProxy via hostname resolution (`haproxy.netlab.local`)
+K6 is dual-homed across two networks:
+- **Internal** (`10.0.2.30`): For Prometheus remote write and DNS resolution
+- **DMZ** (`10.0.1.30`): For load testing HAProxy at `10.0.1.20`
+- **DNS**: Uses internal DNS server (`10.0.2.10`)
+- **Target**: HAProxy DMZ interface via static IP (`http://10.0.1.20`)
 
 ## Troubleshooting
 
@@ -243,7 +244,7 @@ docker compose ps web1 web2
 docker compose logs web1 web2
 
 # Test connectivity from K6 container
-docker compose exec k6 curl -v http://haproxy.netlab.local:8080
+docker compose exec k6 curl -v http://10.0.1.20
 ```
 
 ### Tests Running Slowly
@@ -310,7 +311,8 @@ export const options = {
 };
 
 export default function () {
-  const res = http.get('http://haproxy.netlab.local:8080');
+  // Target HAProxy's DMZ interface (same subnet as K6)
+  const res = http.get('http://10.0.1.20');
   check(res, {
     'status is 200': (r) => r.status === 200,
   });

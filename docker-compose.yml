@@ -300,6 +300,67 @@ services:
         max-file: "3"
 
   # ============================================
+  # LAYER 7: WEB SERVER 3 - NGINX WITH HTTPS/TLS
+  # ============================================
+  web3:
+    build:
+      context: ./web3
+      dockerfile: Dockerfile
+    container_name: netlab-web3
+    hostname: web3
+
+    networks:
+      net_dmz:
+        ipv4_address: ${WEB3_IP:-10.0.1.12}
+
+    dns:
+      - ${DNS_IP:-10.0.2.10}
+
+    environment:
+      - SERVER_NAME=web3
+
+    volumes:
+      - ./certs/web3-cert.pem:/etc/nginx/ssl/web3-cert.pem:ro
+      - ./certs/web3-key.pem:/etc/nginx/ssl/web3-key.pem:ro
+
+    # Health check: verify HTTPS web server responds
+    healthcheck:
+      test: ["CMD", "curl", "-f", "-k", "https://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.25'
+          memory: 128M
+
+    restart: unless-stopped
+
+    depends_on:
+      router:
+        condition: service_healthy
+      dns:
+        condition: service_healthy
+
+    labels:
+      com.netlab.service: "web3"
+      com.netlab.layer: "layer7"
+      com.netlab.network: "dmz"
+      com.netlab.description: "Nginx web server 3 with HTTPS/TLS support"
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ============================================
   # LAYER 4/7: LOAD BALANCER - HAPROXY
   # ============================================
   haproxy:
@@ -323,6 +384,8 @@ services:
 
     volumes:
       - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ./certs/haproxy.pem:/etc/haproxy/certs/haproxy.pem:ro
+      - ./certs/ca-cert.pem:/etc/haproxy/certs/ca-cert.pem:ro
 
     dns:
       - ${DNS_IP:-10.0.2.10}
@@ -352,6 +415,8 @@ services:
       web1:
         condition: service_healthy
       web2:
+        condition: service_healthy
+      web3:
         condition: service_healthy
 
     labels:
@@ -481,6 +546,8 @@ services:
       web1:
         condition: service_healthy
       web2:
+        condition: service_healthy
+      web3:
         condition: service_healthy
 
     labels:
@@ -641,7 +708,7 @@ services:
 
     networks:
       net_internal:
-        ipv4_address: ${K6_IP:-10.0.2.30}
+        ipv4_address: ${K6_IP_INTERNAL:-10.0.2.30}
       net_dmz:
         ipv4_address: ${K6_IP_DMZ:-10.0.1.30}
 

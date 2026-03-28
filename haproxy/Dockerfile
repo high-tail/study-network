@@ -10,6 +10,7 @@ RUN apk add --no-cache \
     curl \
     iputils \
     bind-tools \
+    openssl \
     prometheus-node-exporter
 
 # Copy HAProxy configuration
