@@ -54,11 +54,12 @@ sleep 30
   - Password: `admin`
 
 - **Load Balanced Web Servers**: http://localhost:8080
+- **Load Balanced HTTPS**: https://localhost:8443 (requires certs: `./scripts/generate-certs.sh`)
 
 - **Prometheus Instances**:
-  - Internal: http://localhost:9090 (monitors DNS, DHCP)
-  - DMZ: http://localhost:9091 (monitors Web1, Web2)
-  - Public: http://localhost:9092 (monitors HAProxy)
+  - Internal: http://localhost:9090 (monitors DNS, DHCP, Router)
+  - DMZ: http://localhost:9091 (monitors Web1, Web2, Web3, HAProxy, Router)
+  - Public: http://localhost:9092 (monitors HAProxy, Router, Grafana)
 
 ### 4. Run Test Scripts
 
@@ -102,8 +103,10 @@ Verify routing between different network segments:
 # Ping from router to web1 (DMZ network)
 docker exec netlab-router ping -c 3 10.0.1.10
 
-# Ping from web1 to DNS server (across networks via router)
-docker exec netlab-web1 ping -c 3 10.0.2.10
+# Test cross-network routing from the router (end hosts route through Docker's
+# gateway, not FRRouting — cross-network pings from containers like web1 won't work)
+docker exec netlab-router ping -c 3 10.0.2.10  # router → Internal (DNS)
+docker exec netlab-router ping -c 3 10.0.3.10  # router → Public (HAProxy)
 
 # View routing table on router
 docker exec netlab-router ip route show
@@ -114,13 +117,17 @@ docker exec netlab-router ip route show
 Test DNS name resolution:
 
 ```bash
-# Resolve web server names
-docker exec netlab-haproxy nslookup web1.netlab.local 10.0.2.10
-docker exec netlab-haproxy nslookup web2.netlab.local 10.0.2.10
+# Resolve web server names (use netlab-k6 — it's on the Internal network and
+# can reach the DNS server at 10.0.2.10; DMZ/Public containers cannot)
+docker exec netlab-k6 nslookup web1.netlab.local 10.0.2.10
+docker exec netlab-k6 nslookup web2.netlab.local 10.0.2.10
 
 # Test CNAME resolution (www and api point to haproxy)
-docker exec netlab-haproxy nslookup www.netlab.local 10.0.2.10
-docker exec netlab-haproxy nslookup api.netlab.local 10.0.2.10
+docker exec netlab-k6 nslookup www.netlab.local 10.0.2.10
+docker exec netlab-k6 nslookup api.netlab.local 10.0.2.10
+
+# Query directly from the DNS container itself
+docker exec netlab-dns nslookup web1.netlab.local 127.0.0.1
 
 # View DNS logs
 docker logs netlab-dns
