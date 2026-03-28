@@ -89,11 +89,11 @@ graph TB
     Host9091 --> PrometheusDMZ
     Host9092 --> PrometheusPublic
 
-    %% DNS resolution
+    %% DNS resolution (logical dependency; DMZ containers use Docker's internal
+    %% resolver and cannot query 10.0.2.10 directly — test from netlab-k6 or netlab-dns)
     Web1 -.->|DNS| DNS
     Web2 -.->|DNS| DNS
     Web3 -.->|DNS| DNS
-    HAProxyDMZ -.->|DNS| DNS
 
     %% K6 load testing (dual-homed: Internal + DMZ)
     K6 -.- K6DMZ
@@ -465,7 +465,9 @@ Monitor DNS traffic:
 docker logs -f netlab-dns
 
 # In another terminal, make DNS queries
-docker exec netlab-haproxy nslookup web1.netlab.local 10.0.2.10
+# (use netlab-k6 — it's on the Internal network and can reach 10.0.2.10;
+#  DMZ/Public containers like haproxy cannot query the DNS server directly)
+docker exec netlab-k6 nslookup web1.netlab.local 10.0.2.10
 ```
 
 #### 4. Test Load Balancing Algorithms
@@ -492,9 +494,9 @@ Use Grafana to visualize performance:
 ### Advanced Exercises
 
 1. **Add a new web server** (web4):
-   - Copy `web3/` directory as template
+   - Copy `web1/` directory as template (it's the plain HTTP server; `web3/` is HTTPS-only)
    - Add to `docker-compose.yml` with IP 10.0.1.13 in DMZ
-   - Add to HAProxy backend pool in `haproxy/haproxy.cfg`
+   - Add to `web_servers_http` and `static_servers` backends in `haproxy/haproxy.cfg` (not `web_servers_https` — that backend is for SSL connections to web3 only)
    - Add DNS entry in `dns/dnsmasq.conf`
    - Add Prometheus target in `monitor/prometheus/prometheus-dmz.yml`
 
